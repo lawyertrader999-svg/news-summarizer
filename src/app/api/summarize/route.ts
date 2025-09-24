@@ -1,10 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import * as cheerio from 'cheerio';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Simple text summarization function
+function simpleSummarize(text: string, maxSentences: number = 4): string {
+  // Clean and split text into sentences
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/[.!?]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 20); // Filter out very short sentences
+
+  if (sentences.length <= maxSentences) {
+    return sentences.join(' ') + '.';
+  }
+
+  // Score sentences based on word frequency and position
+  const words = text.toLowerCase().match(/\b\w+\b/g) || [];
+  const wordFreq: { [key: string]: number } = {};
+  
+  // Calculate word frequency
+  words.forEach(word => {
+    if (word.length > 3) { // Ignore short words
+      wordFreq[word] = (wordFreq[word] || 0) + 1;
+    }
+  });
+
+  // Score sentences
+  const sentenceScores = sentences.map((sentence, index) => {
+    const sentenceWords = sentence.toLowerCase().match(/\b\w+\b/g) || [];
+    let score = 0;
+    
+    sentenceWords.forEach(word => {
+      if (wordFreq[word]) {
+        score += wordFreq[word];
+      }
+    });
+    
+    // Boost score for sentences at the beginning
+    if (index < 3) {
+      score *= 1.5;
+    }
+    
+    return { sentence, score, index };
+  });
+
+  // Sort by score and take top sentences
+  const topSentences = sentenceScores
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxSentences)
+    .sort((a, b) => a.index - b.index) // Maintain original order
+    .map(item => item.sentence);
+
+  return topSentences.join(' ') + '.';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,7 +100,6 @@ export async function POST(request: NextRequest) {
                   'ไม่พบหัวข้อ';
 
     // Extract main content
-    // Try different selectors for article content
     let content = '';
     const contentSelectors = [
       'article',
@@ -90,30 +138,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Limit content length for API efficiency
-    const maxContentLength = 4000;
-    if (content.length > maxContentLength) {
-      content = content.substring(0, maxContentLength) + '...';
-    }
-
-    // Generate summary using OpenAI
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "system",
-          content: "คุณเป็นผู้เชี่ยวชาญในการสรุปข่าวภาษาไทย กรุณาสรุปเนื้อหาที่ได้รับให้เป็นข้อความที่กระชับ เข้าใจง่าย และครอบคลุมประเด็นสำคัญ ใช้ภาษาไทยที่เป็นทางการแต่เข้าใจง่าย สรุปให้อยู่ในช่วง 3-5 บรรทัด"
-        },
-        {
-          role: "user",
-          content: `กรุณาสรุปข่าวต่อไปนี้:\n\nหัวข้อ: ${title}\n\nเนื้อหา: ${content}`
-        }
-      ],
-      max_tokens: 300,
-      temperature: 0.3,
-    });
-
-    const summary = completion.choices[0]?.message?.content?.trim();
+    // Generate summary using simple algorithm
+    const summary = simpleSummarize(content, 4);
 
     if (!summary) {
       return NextResponse.json(
@@ -131,13 +157,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error in summarize API:', error);
     
-    if (error instanceof Error && error.message.includes('API key')) {
-      return NextResponse.json(
-        { error: 'ไม่สามารถเชื่อมต่อกับบริการ AI ได้' },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json(
       { error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' },
       { status: 500 }
