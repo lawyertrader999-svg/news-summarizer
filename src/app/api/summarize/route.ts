@@ -148,10 +148,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    return new NextResponse(JSON.stringify({
       success: true,
       summary,
       originalTitle: title
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+      },
     });
 
   } catch (error) {
